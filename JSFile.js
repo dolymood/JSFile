@@ -182,11 +182,6 @@
         // https://developer.mozilla.org/en-US/docs/Web/API/LocalFileSystem
         webkitRFS = win.webkitRequestFileSystem,
         RFS = win.RequestFileSystem || webkitRFS || mozRequestFileSystem,
-        throwOutside = function (ex) {
-            (win.setImmediate || win.setTimeout)(function() {
-                throw ex;
-            }, 0);
-        },
         // 流数据类型
         forceAaveableType = 'application/octet-stream',
         fsMinSize = 0, // 本地文件系统大小
@@ -210,7 +205,7 @@
                 if (targetView) {
                     targetView.location.href = objURL;
                 } else {
-                    window.open(objURL, '_blank');
+                    win.open(objURL, '_blank');
                 }
                 filesaver.readyState = filesaver.DONE;
                 event.trigger(filesaver, 'writestart progress write writeend');
@@ -256,64 +251,69 @@
                 // fs => FileSystem对象
                 // fs.root {DirectoryEntry} => 当前文件系统的根目录
                 // DirectoryEntry 详见：
+                // https://developer.mozilla.org/en-US/docs/Web/API/DirectoryEntry
                 // http://dev.w3.org/2009/dap/file-system/pub/FileSystem/#idl-def-DirectoryEntry
                 // fs.name {String} => 当前文件系统的名字 唯一的 
                 // https://developer.mozilla.org/en-US/docs/Web/API/FileSystem?redirectlocale=en-US&redirectslug=DOM%2FFile_API%2FFile_System_API%2FFileSystem
                 fs.root.getDirectory('saved', createIfNotFound, abortable(function(dirEntry) {
-                    dirEntry.getFile(name, createIfNotFound, abortable(function(fileEntry) {
-                        fileEntry.createWriter(abortable(function(fileWriter) {
-                            // http://dev.w3.org/2009/dap/file-system/file-writer.html
-                            // fileWriter.
-                        }), fs_error);
-                    }), fs_error);
+                    // dirEntry => DirectoryEntry
+                    var save = function() {
+                        dirEntry.getFile(name, createIfNotFound, abortable(function(fileEntry) {
+                            // fileEntry => FileEntry
+                            // http://dev.w3.org/2009/dap/file-system/pub/FileSystem/#idl-def-FileEntry
+                            fileEntry.createWriter(abortable(function(fileWriter) {
+                                // http://dev.w3.org/2009/dap/file-system/file-writer.html
+                                fileWriter.onwriteend = function(evt) {
+                                    targetView && targetView.location.href = fileEntry.toURL();
+                                    deletionQueue.push(fileEntry);
+                                    filesaver.readyState = filesaver.DONE;
+                                    event.trigger(filesaver, 'writeend', evt);
+                                };
+                                fileWriter.onerror = function(err) {
+                                    err = err || fileWriter.error;
+                                    if (err.code !== err.ABORT_ERR) {
+                                        fsError();
+                                    }
+                                };
+                                // 通知外界fileSaver触发某些事件
+                                each('writestart progress write abort'.split(' '), function(evtName) {
+                                    fileWriter['on' + evtName] = function(evt) {
+                                        event.trigger(filesaver, evtName, evt);
+                                    };
+                                });
+                                fileWriter.write(blob);
+                                // 当外界调用abort的时候
+                                // 停止fileWriter
+                                filesaver.abort = function() {
+                                    fileWriter.abort();
+                                    filesaver.readyState = filesaver.DONE;
+                                };
+                                filesaver.readyState = filesaver.WRITING;
+                            }), fsError);
+                        }), fsError);
+                    };
+                    // 尝试得到文件(不创建)
+                    dirEntry.getFile(name, {create: false}, abortable(function(fileEntry) {
+                        // 已经存在
+                        fileEntry.remove();
+                        save();
+                    }), abortable(function(err) {
+                        // 不存在
+                        if (err.code === err.NOT_FOUND_ERR) {
+                            // 当找不到的时候 保存
+                            save();
+                        } else {
+                            // 其他错误
+                            fsError();
+                        }
+                    }));
                 }), fsError);
             }), abortable(function(fr) {
                 // 失败
                 // fr => FileError对象
+                // https://developer.mozilla.org/en-US/docs/Web/API/FileError?redirectlocale=en-US&redirectslug=Web%2FGuide%2FFile_System_API%2FFileError
                 fsError();
             }));
-            function(fs) {
-                fs.root.getDirectory("saved", create_if_not_found, abortable(function(dir) {
-                    var save = function() {
-                        dir.getFile(name, create_if_not_found, abortable(function(file) {
-                            file.createWriter(abortable(function(writer) {
-                                writer.onwriteend = function(event) {
-                                    target_view.location.href = file.toURL();
-                                    deletion_queue.push(file);
-                                    filesaver.readyState = filesaver.DONE;
-                                    dispatch(filesaver, "writeend", event);
-                                };
-                                writer.onerror = function() {
-                                    var error = writer.error;
-                                    if (error.code !== error.ABORT_ERR) {
-                                        fs_error();
-                                    }
-                                };
-                                "writestart progress write abort".split(" ").forEach(function(event) {
-                                    writer["on" + event] = filesaver["on" + event];
-                                });
-                                writer.write(blob);
-                                filesaver.abort = function() {
-                                    writer.abort();
-                                    filesaver.readyState = filesaver.DONE;
-                                };
-                                filesaver.readyState = filesaver.WRITING;
-                            }), fs_error);
-                        }), fs_error);
-                    };
-                    dir.getFile(name, {create: false}, abortable(function(file) {
-                        // delete file if it already exists
-                        file.remove();
-                        save();
-                    }), abortable(function(ex) {
-                        if (ex.code === ex.NOT_FOUND_ERR) {
-                            save();
-                        } else {
-                            fs_error();
-                        }
-                    }));
-                }), fs_error);
-            }
         };
         mix(FileSaver.prototype, {
 
@@ -333,14 +333,16 @@
             return new FileSaver(blob, name);
         }
 
-        event.on('unload', function() {
+        event.on(win, 'unload', function() {
             // 释放 URL对象以及File对象
             var i = deletionQueue.length;
             while (i--) {
                 var file = deletionQueue[i];
                 if (typeof file === 'string') {
+                    // URL Object
                     URL.revokeObjectURL(file);
                 } else {
+                    // FileEntry
                     file.remove();
                 }
             }
