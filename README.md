@@ -1,4 +1,4 @@
-File
+JSFile
 ====
 
 JavaScript File
