@@ -11,10 +11,17 @@
  */
 (function(win, doc) {
 
+    // http://www.w3.org/TR/FileAPI/
     var JSFile = JSFile || {},
         toStr = JSFile.toString,
+        URL = win.URL || win.webkitURL,
         saveAs = saveAs ||
             (navigator.msSaveBlob && navigator.msSaveBlob.bind(navigator)),
+        BlobBuilder = win.BlobBuilder || win.WebKitBlobBuilder ||
+                      win.MozBlobBuilder || win.MSBlobBuilder,
+        Blob = win.Blob,
+        // 流数据类型
+        forceAaveableType = 'application/octet-stream',
         event = {},
         eventObj = {},
         specialEvents = {},
@@ -162,16 +169,47 @@
         };
     });
 
+    // URL 具有 createObjectURL revokeObjectURL两个方法
+    // 前者是创建对象URL 后者是释放对象URL
+    // https://dvcs.w3.org/hg/url/raw-file/tip/Overview.html
+    // https://developer.mozilla.org/zh-CN/docs/DOM/window.URL.createObjectURL
+    if (!URL) {
+        URL = function URL() {};
+        mix(URL, {
+
+            _URLS: [],
+            
+            createObjectURL: function(blob) {
+                var type = blob.type || forceAaveableType,
+                    dataURIHeader = 'data:' + type,
+                    ret = '';
+                if (blob.encoding === 'base64') {
+                    ret = dataURIHeader + ';base64,' + blob.data;
+                } else if (blob.encoding === 'URI') {
+                    ret = dataURIHeader + ',' + decodeURIComponent(blob.data);
+                }
+                if (btoa) {
+                    ret = dataURIHeader + ';base64,' + btoa(blob.data);
+                } else {
+                    ret = dataURIHeader + ',' + encodeURIComponent(blob.data);
+                }
+                URL._URLS.push(ret);
+                return ret;
+            },
+
+            revokeObjectURL: function(objURL) {
+                each(URL._URLS, function(url, i) {
+                    if (objURL === url) {
+                        URL._URLS.splice(i, 1);
+                    }
+                });
+            }
+        });
+    }
+
     saveAs || (saveAs = function(win, doc) {
 
-        var 
-        getURL = function() {
-            // URL 具有 createObjectURL revokeObjectURL两个方法
-            // 前者是创建对象URL 后者是释放对象URL
-            // https://developer.mozilla.org/zh-CN/docs/DOM/window.URL.createObjectURL
-            return win.URL || win.webkitURL || win;
-        },
-        URL = getURL(),
+        var
         getObjURL = function(blob) {
             var objURL = URL.createObjectURL(blob);
             deletionQueue.push(objURL);
@@ -182,8 +220,6 @@
         // https://developer.mozilla.org/en-US/docs/Web/API/LocalFileSystem
         webkitRFS = win.webkitRequestFileSystem,
         RFS = win.RequestFileSystem || webkitRFS || mozRequestFileSystem,
-        // 流数据类型
-        forceAaveableType = 'application/octet-stream',
         fsMinSize = 0, // 本地文件系统大小
         deletionQueue = [],
         FileSaver = function(blob, name) {
@@ -352,6 +388,163 @@
         return saveAs;
     }(win, doc));
 
+    // BlobBuilder
+    // http://dev.w3.org/2009/dap/file-system/file-writer.html#the-blobbuilder-interface
+    // https://developer.mozilla.org/en-US/docs/DOM/BlobBuilder?redirect=no
+    if (!BlobBuilder && !getType(BlobBuilder, 'function')) {
+        BlobBuilder = function(win) {
+            
+            var
+            // FileReader => 异步读取
+            // FileReaderSync => 同步读取
+            // 读取File(inherits from Blob)或Blob对象中的内容
+            // http://www.w3.org/TR/FileAPI/#dfn-FileReaderSync
+            FileReaderSync = win.FileReaderSync,
+            FileException = function(type) {
+                this.code = this[this.name = type];
+            },
+            FEProto = FileException.prototype,
+            // 将ascii字符串或二进制数据转换成一个base64编码过的字符串,
+            // 该方法不能直接作用于Unicode字符串.
+            // https://developer.mozilla.org/en-US/docs/Web/API/window.btoa
+            btoa = win.btoa,
+            // 和btoa方法相反 将已经被base64编码过的数据进行解码.
+            // https://developer.mozilla.org/en-US/docs/Web/API/window.atob?redirectlocale=en-US&redirectslug=DOM%2Fwindow.atob
+            atob = win.atob,
+            // 二进制数据的原始缓冲区 类型化数组
+            // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Typed_arrays/ArrayBuffer
+            // http://msdn.microsoft.com/zh-cn/library/ie/br212474(v=vs.94).aspx
+            // http://msdn.microsoft.com/zh-cn/library/ie/br212485(v=vs.94).aspx
+            // http://blog.csdn.net/hfahe/article/details/7421203
+            ArrayBuffer = win.ArrayBuffer,
+            Uint8Array = win.Uint8Array,
+            // 类型化数组是否可以通过fun.apply调用
+            canApplyTypedArrays = false,
+            FakeBlob;
+
+            function BlobBuilder() {
+                this.data = [];
+            }
+
+            FakeBlob = function Blob(data, type, encoding) {
+                this.data = data;
+                this.size = data.length;
+                this.type = type;
+                this.encoding = encoding;
+            };
+
+            BlobBuilder.fake = FakeBlob.prototype.fake = true;
+
+            // https://developer.mozilla.org/en-US/docs/Web/API/FileException
+            each((
+                'NOT_FOUND_ERR SECURITY_ERR ABORT_ERR NOT_READABLE_ERR ENCODING_ERR ' +
+                'NO_MODIFICATION_ALLOWED_ERR INVALID_STATE_ERR SYNTAX_ERR  ' +
+                'INVALID_MODIFICATION_ERR QUOTA_EXCEEDED_ERR TYPE_MISMATCH_ERR PATH_EXISTS_ERR '
+            ).match(rword), function(NAME, i) {
+                FEProto[NAME] = i + 1;
+            });
+
+            if (Uint8Array) {
+                try {
+                    (function(pass) {
+                        canApplyTypedArrays = !pass;
+                    }).apply(win, new Uint8Array(1));
+                } catch(e) {}
+            }
+            
+            mix(FakeBlob.prototype, {
+
+                toString: function() {
+                    return '[object Blob]';
+                },
+
+                slice: function(start, end, type) {
+                    type || (type = null);
+                    start || (start = 0);
+                    end || (end = this.data.length);
+                    return new FakeBlob(this.data.slice(start, end), type, this.encoding);
+                }
+
+            });
+
+            mix(BlobBuilder.prototype, {
+
+                append: function(data, endings) {
+                    // data 可以是String|Blob|ArrayBuffer
+                    var _data = this.data, dataType = getType(data);
+                    if (Uint8Array && (data instanceof ArrayBuffer || data instanceof Uint8Array)) {
+                        if (canApplyTypedArrays) {
+                            _data.push(String.fromCharCode.apply(String, new Uint8Array(data)));
+                        } else {
+                            var str = '',
+                                buf = new Uint8Array(data),
+                                i = 0,
+                                bufLen = buf.length;
+                            ;
+                            for (; i < bufLen; i++) {
+                                str += String.fromCharCode(buf[i]);
+                            }
+                            _data.push(str);
+                        }
+                    } else if (dataType === 'Blob' || dataType === 'File') {
+                        if (FileReaderSync) {
+                            _data.push((new FileReaderSync()).readAsBinaryString(data));
+                        } else {
+                            throw new FileException('NOT_READABLE_ERR');
+                        }
+                    } else if (data instanceof FakeBlob) {
+                        if (data.encoding === 'base64' && atob) {
+                            _data.push(atob(data.data));
+                        } else if (data.encoding === 'URI') {
+                            _data.push(decodeURIComponent(data.data));
+                        } else if (data.encoding === 'raw') {
+                            _data.push(data.data);
+                        }
+                    } else {
+                        data += '';
+                        // 参见btoa 的 Unicode Strings章节
+                        // 在js引擎内部,encodeURIComponent(str)相当于escape(unicodeToUTF8(str))
+                        // 所以可以猜测unicodeToUTF8(str)等同于unescape(encodeURIComponent(str))
+                        /* function utf8_to_b64( str ) {
+                               return window.btoa(unescape(encodeURIComponent( str )));
+                           }
+                        */
+                        _data.push(unescape(encodeURIComponent(data)));
+                    }
+                },
+
+                getBlob: function(type) {
+                    type || (type = null);
+                    return new FakeBlob(this.data.join(''), type, 'raw');
+                },
+
+                toString: function() {
+                    return '[object BlobBuilder]';
+                }
+
+            });
+
+            return BlobBuilder;
+        }(win);
+    }
+
+    // Blob => Big Large Object
+    // http://www.w3.org/TR/FileAPI/#dfn-Blob
+    if (!Blob || !getType(Blob, 'function')) {
+        // blobParts
+        // http://www.w3.org/TR/2012/WD-FileAPI-20121025/#dfn-blobParts
+        Blob = function(blobParts, options) {
+            var type = options && options.type || '';
+            var builder = new BlobBuilder();
+            if (blobParts) {
+                for (var i = 0, len = blobParts.length; i < len; i++) {
+                    builder.append(blobParts[i]);
+                }
+            }
+            return builder.getBlob(type);
+        };
+    }
+
     mix(JSFile, {
 
         mix: mix,
@@ -361,6 +554,10 @@
         getUid: getUid,
 
         event: event,
+
+        BlobBuilder: BlobBuilder,
+
+        Blob: Blob,
 
         saveAs: saveAs
 
