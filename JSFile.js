@@ -85,12 +85,16 @@
             context || (context = win);
             if (isArray) {
                 for (var n = obj.length; i < n; i++) {
-                    fn.call(context, obj[i], i, obj);
+                    if (false ===fn.call(context, obj[i], i, obj)) {
+                        break;
+                    }
                 }
             } else {
                 for (i in obj) {
                     if (obj.hasOwnProperty(i)) {
-                        fn.call(context, obj[i], i, obj);
+                        if (false ===fn.call(context, obj[i], i, obj)) {
+                            break;
+                        }
                     }
                 }
             }
@@ -605,6 +609,8 @@
 
                 fileInput: null,
 
+                paramName: undefined,
+
                 singleFileUploads: true,
 
                 limitMultiFileUploads: false,
@@ -663,7 +669,9 @@
 
                 onPaste: noop,
 
-                onChange: noop
+                onChange: noop,
+
+                onAdd: noop
 
             }, options);
     
@@ -731,12 +739,151 @@
                 }
             },
 
-            _onChange: function() {
+            _onChange: function(e) {
+                var that = this,
+                    data = {
+                        fileInput: e.target,
+                        form: e.target.form
+                    };
+                this._getFileInputFiles(data.fileInput, function (files) {
+                    data.files = files;
+                    if (that.options.onChange.call(that, e, data) !== false) {
+                        that._onAdd(e, data);
+                    }
+                });
+            },
 
+            _getFileInputFiles: function(fileInput, func) {
+                var entries = fileInput.webkitEntries || fileInput.entries,
+                    files,
+                    value;
+                // https://webcache.googleusercontent.com/search?q=cache:CP0LYsOUWBkJ:updates.html5rocks.com/2012/08/Integrating-input-type-file-with-the-Filesystem-API+&cd=1&hl=zh-CN&ct=clnk&gl=cn
+                if (entries && entries.length) {
+                    return func(this._handleFileTreeEntries(entries));
+                }
+                files = fileInput.files;
+                if (!files.length) {
+                    value = fileInput.value;
+                    if (!value) {
+                        return func([]);
+                    }
+                    // If the files property is not available, the browser does not
+                    // support the File API and we add a pseudo File object with
+                    // the input value as name with path information removed:
+                    files = [{name: value.replace(/^.*\\/, '')}];
+                } else if (files[0].name === undefined && files[0].fileName) {
+                    // File normalization for Safari 4 and Firefox 3:
+                    each(files, function (file) {
+                        file.name = file.fileName;
+                        file.size = file.fileSize;
+                    });
+                }
+                return func(files);
+            },
+
+            _handleFileTreeEntry: function(entry, path) {
+                // https://developer.mozilla.org/en-US/docs/Web/API/Entry
+                // https://developer.mozilla.org/en-US/docs/Web/API/FileEntry
+                var that = this,
+                    errorHandler = function (e) {
+                        if (e && !e.entry) {
+                            e.entry = entry;
+                        }
+                        files = [e];
+                    },
+                    dirReader, files;
+                path = path || '';
+                if (entry.isFile) {
+                    if (entry._file) {
+                        // Workaround for Chrome bug #149735
+                        entry._file.relativePath = path;
+                        files = entry._file;
+                    } else {
+                        entry.file(function (file) {
+                            file.relativePath = path;
+                            files = file;
+                        }, errorHandler);
+                    }
+                } else if (entry.isDirectory) {
+                    dirReader = entry.createReader();
+                    dirReader.readEntries(function (entries) {
+                        files = that._handleFileTreeEntries(
+                            entries,
+                            path + entry.name + '/'
+                        );
+                    }, errorHandler);
+                } else {
+                    // Return an empy list for file system items
+                    // other than files or directories:
+                    files = [];
+                }
+                return files;
+            },
+
+            _handleFileTreeEntries: function(entries, path) {
+                var files = [];
+                each(entries, function(entry) {
+                    files.push(this._handleFileTreeEntry(entry, path));
+                }, this);
+                return files;
+            },
+
+            _getParamName: function(options) {
+                var fileInput = options.fileInput,
+                    paramName = options.paramName;
+                if (!paramName) {
+                    paramName = [];
+                    var name = fileInput.name || 'files[]',
+                        i = (fileInput.files || [1]).length;
+                    while (i--) {
+                        paramName.push(name);
+                    }
+                } else if (!getType(paramName, 'array')) {
+                    paramName = [paramName];
+                }
+                return paramName;
             },
 
             _onAdd: function(e, data) {
-
+                var that = this,
+                    result = true,
+                    options = mix({}, this.options, data),
+                    limit = options.limitMultiFileUploads,
+                    paramName = this._getParamName(options),
+                    paramNameSet,
+                    paramNameSlice,
+                    fileSet,
+                    i;
+                if (!(options.singleFileUploads || limit) ||
+                        !this._isXHRUpload(options)) {
+                    fileSet = [data.files];
+                    paramNameSet = [paramName];
+                } else if (!options.singleFileUploads && limit) {
+                    fileSet = [];
+                    paramNameSet = [];
+                    for (i = 0; i < data.files.length; i += limit) {
+                        fileSet.push(data.files.slice(i, i + limit));
+                        paramNameSlice = paramName.slice(i, i + limit);
+                        if (!paramNameSlice.length) {
+                            paramNameSlice = paramName;
+                        }
+                        paramNameSet.push(paramNameSlice);
+                    }
+                } else {
+                    paramNameSet = paramName;
+                }
+                data.originalFiles = data.files;
+                each(fileSet || data.files, function (element, index) {
+                    var newData = mix({}, data);
+                    newData.files = fileSet ? element : [element];
+                    newData.paramName = paramNameSet[index];
+                    // ..................................
+                    // that._initResponseObject(newData);
+                    // that._initProgressObject(newData);
+                    // that._addConvenienceMethods(e, newData);
+                    return that.options.onAdd.call(that, e, newData);
+                });
+                return result;
             },
 
             _getTotal: function(files) {
