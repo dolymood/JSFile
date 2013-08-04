@@ -596,47 +596,65 @@
 
             xhrFileUpload: !!(win.XMLHttpRequestUpload && win.FileReader),
 
-            xhrFormDataFileUpload: !!window.FormData
+            xhrFormDataFileUpload: !!win.FormData
 
         };
 
-        function Upload(options) {
+        function Upload(ele, options) {
             this.options = mix({
 
+                // 拖拽区域
                 dropZone: doc,
 
+                // 粘贴区域
                 pasteZone: doc,
 
+                // input type=file 元素
                 fileInput: null,
 
                 paramName: undefined,
 
+                // 是否是单独文件上传
+                // 默认是true，如果是false的话
+                // 将所有文件一次上传
                 singleFileUploads: true,
 
+                // 如果singleFileUploads是false
+                // 要限制一个xhr能够上传的文件数
                 limitMultiFileUploads: false,
 
+                // 是否有序上传
                 sequentialUploads: false,
 
+                // 并发上传限制数目
                 limitConcurrentUploads: undefined,
 
+                // 默认情况下 XHR 文件上传是复合式(multipart)form-data
                 multipart: true,
 
+                // 分块上传时每块的大小限制值
                 maxChunkSize: undefined,
 
+                // 已上传的字节数 这个是会被更改的
                 uploadedBytes: undefined,
 
-                recalculateProgress: true,
+                // 
+                recalculateProgress : true,
 
+                // progress事件触发间隔
                 progressInterval: 100,
 
+                // progress过程中 计算上传百分比的时间间隔
                 bitrateInterval: 500,
 
+                // 当有文件新增的时候是否自动上传
                 autoUpload: true,
 
                 messages: {
                     uploadedBytes: '上传文件过大'
                 },
 
+                // 便捷的封装得到错误信息的函数
                 i18n: function(message, context) {
                     message = this.messages[message] || message.toString();
                     if (context) {
@@ -648,12 +666,32 @@
                 },
 
                 formData: function(form) {
-                    return form.serializeArray();
+                    var result = [];
+                    each(form.elements, function(ele) {
+                      var type = ele.getAttribute('type');
+                      if (ele.nodeName.toLowerCase() != 'fieldset' &&
+                        !ele.disabled && type != 'submit' && type != 'reset' && type != 'button' &&
+                        ((type != 'radio' && type != 'checkbox') || ele.checked))
+                        result.push({
+                          name: ele.getAttribute('name'),
+                          value: ele.value
+                        });
+                    });
+                    return result
                 },
 
                 add: function(e, data) {
-
+                    // 是自动提交的话
+                    if (data.autoUpload || (data.autoUpload !== false &&
+                            this.options.autoUpload)) {
+                        data.success(function() {
+                            data.submit();
+                        });
+                    }
+                    return this.options.onAdd.call(this, e, data);
                 },
+
+                onAdd: noop,
 
                 processData: false,
 
@@ -671,9 +709,35 @@
 
                 onChange: noop,
 
-                onAdd: noop
+                onAdd: noop,
+
+                onProgress: noop,
+
+                onProgressAll: noop,
+
+                onSubmit: noop,
+
+                onSend: noop,
+
+                onDone: noop,
+
+                onFail: noop,
+
+                onAlways: noop,
+
+                onStart: noop,
+
+                onChunkSend: noop,
+
+                onChunkDone: noop,
+
+                onChunkFail: noop,
+
+                onChunkAlways: noop
 
             }, options);
+
+            this.ele = ele;
     
             this.init();
 
@@ -682,8 +746,35 @@
         mix(Upload.prototype, {
 
             init: function() {
-                this.
+                this._initOptions();
+                // 所有的上传
+                this.uploads = [];
+                // 正在上传的数目 当前上传index
+                this._sendingNo = this._activeIndex = 0;
+                this._initProgressObject(this);
                 this._initEvents();
+            },
+
+            _initOptions: function() {
+                var ele = this.ele;
+                if (!this.options.fileInput) {
+                    if (ele.nodeType === 1 && ele.nodeName.toLowerCase() === 'input' &&
+                        ele.type && ele.type === 'file') {
+                        this.options.fileInput = ele;
+                    } else if (ele.querySelector) {
+                        this.options.fileInput = ele.querySelector('input[type="file"]');
+                    }
+                }
+                if (getType(this.options.dropZone, 'string')) {
+                    this.options.dropZone = doc.querySelector(this.options.dropZone);
+                }
+                if (getType(this.options.pasteZone, 'string')) {
+                    this.options.pasteZone = doc.querySelector(this.options.pasteZone);
+                }
+            },
+
+            xhr: function() {
+                return new XMLHttpRequest();
             },
 
             _initEvents: function() {
@@ -759,7 +850,9 @@
                     value;
                 // https://webcache.googleusercontent.com/search?q=cache:CP0LYsOUWBkJ:updates.html5rocks.com/2012/08/Integrating-input-type-file-with-the-Filesystem-API+&cd=1&hl=zh-CN&ct=clnk&gl=cn
                 if (entries && entries.length) {
-                    return func(this._handleFileTreeEntries(entries));
+                    return this._handleFileTreeEntries(entries, null, function(fs) {
+                        func(fs);
+                    });
                 }
                 files = fileInput.files;
                 if (!files.length) {
@@ -781,7 +874,7 @@
                 return func(files);
             },
 
-            _handleFileTreeEntry: function(entry, path) {
+            _handleFileTreeEntry: function(entry, path, entries) {
                 // https://developer.mozilla.org/en-US/docs/Web/API/Entry
                 // https://developer.mozilla.org/en-US/docs/Web/API/FileEntry
                 var that = this,
@@ -790,6 +883,7 @@
                             e.entry = entry;
                         }
                         files = [e];
+                        Event.trigger(entries, 'onedone', files);
                     },
                     dirReader, files;
                 path = path || '';
@@ -797,19 +891,23 @@
                     if (entry._file) {
                         // Workaround for Chrome bug #149735
                         entry._file.relativePath = path;
-                        files = entry._file;
+                        files = [entry._file];
                     } else {
                         entry.file(function (file) {
                             file.relativePath = path;
-                            files = file;
+                            files = [file];
+                            Event.trigger(entries, 'onedone', files);
                         }, errorHandler);
                     }
                 } else if (entry.isDirectory) {
                     dirReader = entry.createReader();
-                    dirReader.readEntries(function (entries) {
-                        files = that._handleFileTreeEntries(
-                            entries,
-                            path + entry.name + '/'
+                    dirReader.readEntries(function (_entries) {
+                        that._handleFileTreeEntries(
+                            _entries,
+                            path + entry.name + '/',
+                            function(files) {
+                                Event.trigger(entries, 'onedone', files);
+                            }
                         );
                     }, errorHandler);
                 } else {
@@ -817,15 +915,24 @@
                     // other than files or directories:
                     files = [];
                 }
+                if (files) Event.trigger(entries, 'onedone', files);
                 return files;
             },
 
-            _handleFileTreeEntries: function(entries, path) {
+            _handleFileTreeEntries: function(entries, path, func) {
                 var files = [];
+                var len = entries.length;
+                Event.on(entries, 'onedone', function(file) {
+                    files.push(file);
+                    // 所有的都已得到
+                    if (files.length === len) {
+                        Event.off(entries, 'onedone');
+                        func(files);
+                    }
+                });
                 each(entries, function(entry) {
-                    files.push(this._handleFileTreeEntry(entry, path));
+                    this._handleFileTreeEntry(entry, path, entries);
                 }, this);
-                return files;
             },
 
             _getParamName: function(options) {
@@ -873,17 +980,300 @@
                     paramNameSet = paramName;
                 }
                 data.originalFiles = data.files;
-                each(fileSet || data.files, function (element, index) {
+                each(fileSet || data.files, function (fl, index) {
                     var newData = mix({}, data);
-                    newData.files = fileSet ? element : [element];
+                    // 每一个fileSet中包含的多个file
+                    newData.files = fileSet ? fl : [fl];
                     newData.paramName = paramNameSet[index];
-                    // ..................................
-                    // that._initResponseObject(newData);
-                    // that._initProgressObject(newData);
-                    // that._addConvenienceMethods(e, newData);
-                    return that.options.onAdd.call(that, e, newData);
+                    that._initResponseObject(newData);
+                    that._initProgressObject(newData);
+                    that._addConvenienceMethods(e, newData);
+                    return that.options.add.call(that, e, newData);
                 });
                 return result;
+            },
+
+            _onSend: function(e, data) {
+                if (!data.submit) {
+                    this._addConvenienceMethods(e, data);
+                }
+                var that = this,
+                    xhr,
+                    options = that._getAjaxSettings(data),
+                    send = function() {
+                        this._sendingNo += 1;
+                        options._bitrateTimer = new that._BitrateTimer();
+                        xhr = xhr || 
+                    }
+                    ///////////////////////
+
+            },
+
+            _initProgressListener: function(options) {
+                var that = this,
+                    xhr = options._xhr ? options._xhr() : this.xhr();
+                // Accesss to the native XHR object is required to add event listeners
+                // for the upload progress event:
+                if (xhr.upload) {
+                    Event.on(xhr.upload, 'progress', function (e) {
+                        that._onProgress(e, options);
+                    });
+                    options._xhr = function () {
+                        return xhr;
+                    };
+                }
+            },
+
+            _onProgress: function(e, data) {
+                if (e.lengthComputable) {
+                    var now = ((Date.now) ? Date.now() : (new Date()).getTime()),
+                        loaded;
+                    if (data._time && data.progressInterval &&
+                            (now - data._time < data.progressInterval) &&
+                            e.loaded !== e.total) {
+                        return;
+                    }
+                    data._time = now;
+                    loaded = Math.floor(
+                        e.loaded / e.total * (data.chunkSize || data._progress.total)
+                    ) + (data.uploadedBytes || 0);
+                    // Add the difference from the previously loaded state
+                    // to the global loaded counter:
+                    this._progress.loaded += (loaded - data._progress.loaded);
+                    this._progress.bitrate = this._bitrateTimer.getBitrate(
+                        now,
+                        this._progress.loaded,
+                        data.bitrateInterval
+                    );
+                    data._progress.loaded = data.loaded = loaded;
+                    data._progress.bitrate = data.bitrate = data._bitrateTimer.getBitrate(
+                        now,
+                        loaded,
+                        data.bitrateInterval
+                    );
+                    // Trigger a custom progress event with a total data property set
+                    // to the file size(s) of the current upload and a loaded data
+                    // property calculated accordingly:
+                    this.options.onProgress.call(this, e, data);
+                    // Trigger a global progress event for all current file uploads,
+                    // including ajax calls queued for sequential file uploads:
+                    this.options.onProgressAll.call(this, e, this._progress);
+                }
+            },
+
+            _getAjaxSettings: function(data) {
+                var options = mix({}, this.options, data);
+                this._initFormSettings(options);
+                this._initDataSettings(options);
+                return options;
+            },
+
+            _getFormData: function(options) {
+                var formData;
+                if (typeof options.formData === 'function') {
+                    return options.formData(options.form);
+                }
+                if (getType(options.formData, 'array')) {
+                    return options.formData;
+                }
+                if (getType(options.formData, 'object')) {
+                    formData = [];
+                    each(options.formData, function (value, name) {
+                        formData.push({name: name, value: value});
+                    });
+                    return formData;
+                }
+                return [];
+            },
+
+            _initXHRData: function(options) {
+                var that = this,
+                    formData,
+                    file = options.files[0][0],
+                    // Ignore non-multipart setting if not supported:
+                    multipart = options.multipart || !support.xhrFileUpload,
+                    paramName = options.paramName[0];
+                options.headers = options.headers || {};
+                if (options.contentRange) {
+                    options.headers['Content-Range'] = options.contentRange;
+                }
+                if (!multipart || options.blob || !getType(file, 'file')) {
+                    options.headers['Content-Disposition'] = 'attachment; filename="' +
+                        encodeURI(file.name) + '"';
+                }
+                if (!multipart) {
+                    options.contentType = file.type;
+                    options.data = options.blob || file;
+                } else if (support.xhrFormDataFileUpload) {
+                    if (getType(options.formData, 'formdata')) {
+                        formData = options.formData;
+                    } else {
+                        formData = new FormData();
+                        each(this._getFormData(options), function (field) {
+                            formData.append(field.name, field.value);
+                        });
+                    }
+                    if (options.blob) {
+                        formData.append(paramName, options.blob, file.name);
+                    } else {
+                        each(options.files, function (file, index) {
+                            // 每一个file都是数组
+                            // 此处。。。。。。
+                            each(file, function(fl) {
+                                if (getType(fl, 'file') ||
+                                    getType(fl, 'Blob')) {
+                                    formData.append(
+                                        options.paramName[index] || paramName,
+                                        fl,
+                                        fl.name
+                                    );
+                                }
+                            });
+                            
+                        });
+                    }
+                    options.data = formData;
+                }
+                // Blob reference is not needed anymore, free memory:
+                options.blob = null;
+            },
+
+            _blobSlice: function() {
+                var slice = this.slice || this.webkitSlice || this.mozSlice;
+                return slice.apply(this, arguments);
+            },
+
+            _chunkedUpload: function(options, testOnly) {
+                options.uploadedBytes = options.uploadedBytes || 0;
+                var that = this,
+                    file = options.files[0][0],
+                    fs = file.size,
+                    ub = options.uploadedBytes,
+                    mcs = options.maxChunkSize || fs,
+                    slice = this._blobSlice,
+                    dfd = $.Deferred(),
+                    promise = dfd.promise(),
+                    jqXHR,
+                    upload;
+                if (!(this._isXHRUpload(options) && slice && (ub || mcs < fs)) ||
+                        options.data) {
+                    return false;
+                }
+                if (testOnly) {
+                    return true;
+                }
+                if (ub >= fs) {
+                    file.error = options.i18n('uploadedBytes');
+                    return this._getXHRPromise(
+                        false,
+                        options.context,
+                        [null, 'error', file.error]
+                    );
+                }
+                // The chunk upload method:
+                upload = function () {
+                    // Clone the options object for each chunk upload:
+                    var o = $.extend({}, options),
+                        currentLoaded = o._progress.loaded;
+                    o.blob = slice.call(
+                        file,
+                        ub,
+                        ub + mcs,
+                        file.type
+                    );
+                    // Store the current chunk size, as the blob itself
+                    // will be dereferenced after data processing:
+                    o.chunkSize = o.blob.size;
+                    // Expose the chunk bytes position range:
+                    o.contentRange = 'bytes ' + ub + '-' +
+                        (ub + o.chunkSize - 1) + '/' + fs;
+                    // Process the upload data (the blob and potential form data):
+                    that._initXHRData(o);
+                    // Add progress listeners for this chunk upload:
+                    that._initProgressListener(o);
+                    jqXHR = ((that._trigger('chunksend', null, o) !== false && $.ajax(o)) ||
+                            that._getXHRPromise(false, o.context))
+                        .done(function (result, textStatus, jqXHR) {
+                            ub = that._getUploadedBytes(jqXHR) ||
+                                (ub + o.chunkSize);
+                            // Create a progress event if no final progress event
+                            // with loaded equaling total has been triggered
+                            // for this chunk:
+                            if (currentLoaded + o.chunkSize - o._progress.loaded) {
+                                that._onProgress($.Event('progress', {
+                                    lengthComputable: true,
+                                    loaded: ub - o.uploadedBytes,
+                                    total: ub - o.uploadedBytes
+                                }), o);
+                            }
+                            options.uploadedBytes = o.uploadedBytes = ub;
+                            o.result = result;
+                            o.textStatus = textStatus;
+                            o.jqXHR = jqXHR;
+                            that._trigger('chunkdone', null, o);
+                            that._trigger('chunkalways', null, o);
+                            if (ub < fs) {
+                                // File upload not yet complete,
+                                // continue with the next chunk:
+                                upload();
+                            } else {
+                                dfd.resolveWith(
+                                    o.context,
+                                    [result, textStatus, jqXHR]
+                                );
+                            }
+                        })
+                        .fail(function (jqXHR, textStatus, errorThrown) {
+                            o.jqXHR = jqXHR;
+                            o.textStatus = textStatus;
+                            o.errorThrown = errorThrown;
+                            that._trigger('chunkfail', null, o);
+                            that._trigger('chunkalways', null, o);
+                            dfd.rejectWith(
+                                o.context,
+                                [jqXHR, textStatus, errorThrown]
+                            );
+                        });
+                };
+                this._enhancePromise(promise);
+                promise.abort = function () {
+                    return jqXHR.abort();
+                };
+                upload();
+                return promise;
+            },
+
+            _initDataSettings: function(options) {
+                if (this._isXHRUpload(options)) {
+                    if (!this._chunkedUpload(options, true)) {
+                        if (!options.data) {
+                            this._initXHRData(options);
+                        }
+                        this._initProgressListener(options);
+                    }
+                }
+            },
+
+            _initFormSettings: function(options) {
+                if (!options.form) {
+                    options.form = options.fileInput.form;
+                    if (!options.form) {
+                        options.form = this.options.fileInput.form;
+                    }
+                }
+                options.paramName = this._getParamName(options);
+                if (!options.url) {
+                    options.url = options.form.action || location.href;
+                }
+                options.type = (options.type || options.form.method || '')
+                    .toUpperCase();
+                if (options.type !== 'POST' && options.type !== 'PUT' &&
+                        options.type !== 'PATCH') {
+                    options.type = 'POST';
+                }
+                if (!options.formAcceptCharset) {
+                    options.formAcceptCharset = options.form.getAttribute('accept-charset');
+                }
             },
 
             _getTotal: function(files) {
@@ -899,11 +1289,26 @@
                     support.xhrFormDataFileUpload;
             },
 
+            _BitrateTimer: function () {
+                this.timestamp = ((Date.now) ? Date.now() : (new Date()).getTime());
+                this.loaded = 0;
+                this.bitrate = 0;
+                this.getBitrate = function (now, loaded, interval) {
+                    var timeDiff = now - this.timestamp;
+                    if (!this.bitrate || !interval || timeDiff > interval) {
+                        this.bitrate = (loaded - this.loaded) * (1000 / timeDiff) * 8;
+                        this.loaded = loaded;
+                        this.timestamp = now;
+                    }
+                    return this.bitrate;
+                };
+            },
+
             _initProgressObject: function(obj) {
                 var progress = {
-                    loaded: 0,
-                    total: 0,
-                    bitrate: 0
+                    loaded: 0, // 已经上传的字节数
+                    total: 0, // 总共字节数
+                    bitrate: 0 // 比例
                 };
                 if (obj._progress) {
                     mix(obj._progress, progress);
@@ -912,7 +1317,51 @@
                 }
             },
 
+            _initResponseObject: function(obj) {
+                var prop;
+                if (obj._response) {
+                    for (prop in obj._response) {
+                        if (obj._response.hasOwnProperty(prop)) {
+                            delete obj._response[prop];
+                        }
+                    }
+                } else {
+                    obj._response = {};
+                }
+            },
 
+            _addConvenienceMethods: function(e, data) {
+                var that = this;
+                data._state = 'pending';
+                data.success = function(func) {
+                    Event.on(data, 'success', func.bind(data, that));
+                };
+                data.fail = function(func) {
+                    Event.on(data, 'fail', func.bind(data, that));
+                };
+                data.submit = function () {
+                    if (this.state() !== 'pending') {
+                        this.xhr = (that.options.onSubmit.call(that, e, this) !== false) &&
+                            that._onSend(e, this);
+                    }
+                    return this;
+                };
+                data.abort = function () {
+                    if (this.xhr) {
+                        return this.xhr.abort();
+                    }
+                    return this;
+                };
+                data.state = function () {
+                    return data._state;
+                };
+                data.progress = function () {
+                    return this._progress;
+                };
+                data.response = function () {
+                    return this._response;
+                };
+            }
 
         });
 
@@ -939,9 +1388,9 @@
 
         saveAs: saveAs,
 
-        upload: function(options) {
+        upload: function(ele, options) {
             options || (options = {});
-            return new Upload(options);
+            return new Upload(ele, options);
         },
 
         saveAsTxt: function(text, name, charset) {
