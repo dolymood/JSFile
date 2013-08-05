@@ -869,10 +869,17 @@
                                     else if (dataType == 'json') result = blankRE.test(result) ? null : JSON.parse(result);
                                 } catch (e) { error = e }
 
-                                if (error) setting.error.call(settings.context, error, xhr, 'parsererror', settings);
-                                else setting.success.call(settings.context, result, xhr, settings);
+                                if (error) {
+                                    setting.error.call(settings.context, error, xhr, 'parsererror', settings);
+                                    setting.complete.call(settings.context, error, xhr, 'parsererror', settings);
+                                }
+                                else {
+                                    setting.success.call(settings.context, result, xhr, settings);
+                                    setting.complete.call(settings.context, result, xhr, settings);
+                                }
                             } else {
                                 setting.error.call(settings.context, null, xhr, 'error', settings);
+                                setting.complete.call(settings.context, null, xhr, 'error', settings);
                             }
                         }
                     }
@@ -886,6 +893,7 @@
                         xhr.onreadystatechange = noop;
                         xhr.abort();
                         setting.error.call(settings.context, null, xhr, 'timeout', settings);
+                        setting.complete.call(settings.context, null, xhr, 'timeout', settings);
                     }, settings.timeout)
 
                     xhr.send(settings.data ? settings.data : null);
@@ -1144,7 +1152,14 @@
                         options._bitrateTimer = new that._BitrateTimer();
                         xhr = xhr || (
                             (aborted || that.options.onSend.call(that, e, options) === false) ||
-                            that._chunkedUpload(options) || that.ajax(options)
+                            that._chunkedUpload(options) || that.ajax(mix(options, {
+                                success: function(result, textStatus, xhr) {
+                                    that._onDone(result, textStatus, xhr);
+                                },
+                                error: function(xhr, textStatus, errorThrown) {
+                                    that._onFail(xhr, textStatus, errorThrown, options);
+                                }
+                            }));
                         );
                     };
                 this._beforeSend(e, options);
