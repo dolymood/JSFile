@@ -790,6 +790,7 @@
                     error: noop,
                     complete: noop,
                     context: null,
+                    dataType: 'json',
                     // MIME types mapping
                     accepts: {
                       script: 'text/javascript, application/javascript',
@@ -840,6 +841,7 @@
                     });
                     if (!settings.url) settings.url = window.location.toString();
                     serializeData(settings);
+                    var dataType = settings.dataType;
                     var mime = settings.accepts[dataType],
                         baseHeaders = { },
                         protocol = /^([\w-]+:)\/\//.test(settings.url) ? RegExp.$1 : window.location.protocol,
@@ -870,16 +872,16 @@
                                 } catch (e) { error = e }
 
                                 if (error) {
-                                    setting.error.call(settings.context, error, xhr, 'parsererror', settings);
-                                    setting.complete.call(settings.context, error, xhr, 'parsererror', settings);
+                                    settings.error.call(settings.context, error, xhr, 'parsererror', settings);
+                                    settings.complete.call(settings.context, error, xhr, 'parsererror', settings);
                                 }
                                 else {
-                                    setting.success.call(settings.context, result, xhr, settings);
-                                    setting.complete.call(settings.context, result, xhr, settings);
+                                    settings.success.call(settings.context, result, xhr, settings);
+                                    settings.complete.call(settings.context, result, xhr, settings);
                                 }
                             } else {
-                                setting.error.call(settings.context, null, xhr, 'error', settings);
-                                setting.complete.call(settings.context, null, xhr, 'error', settings);
+                                settings.error.call(settings.context, null, xhr, 'error', settings);
+                                settings.complete.call(settings.context, null, xhr, 'error', settings);
                             }
                         }
                     }
@@ -1192,17 +1194,17 @@
                     send = function() {
                         that._sendingNo += 1;
                         options._bitrateTimer = new that._BitrateTimer();
-                        return xhr = xhr || (
+                        xhr = xhr || (
                             (aborted || that.options.onSend.call(that, e, options) === false) ||
                             that._chunkedUpload(options) || that.ajax(mix(options, {
                                 success: function(result, textStatus, xhr) {
                                     data.state('resolve');
-                                    Event.trigger(data, 'success', result);
+                                    Event.trigger(options.EVENT, 'success', result);
                                     that._onDone(result, textStatus, xhr, options);
                                 },
                                 error: function(xhr, textStatus, errorThrown) {
                                     data.state('reject');
-                                    Event.trigger(data, 'fail', xhr, textStatus);
+                                    Event.trigger(options.EVENT, 'fail', xhr, textStatus);
                                     that._onFail(xhr, textStatus, errorThrown, options);
                                 },
                                 complete: function(XHRorResult, textStatus, XHRorError) {
@@ -1220,6 +1222,11 @@
                                 }
                             }))
                         );
+                        Event.on(options.EVENT, 'abort', function() {
+                            aborted = true;
+                            xhr.abort();
+                        });
+                        return xhr;
                     };
                 this._beforeSend(e, options);
                 return send();
@@ -1409,7 +1416,7 @@
                 }
                 if (ub >= fs) {
                     file.error = options.i18n('uploadedBytes');
-                    Event.trigger(options, 'fail', null, file.error);
+                    Event.trigger(options.EVENT, 'fail', null, file.error);
                     return options;
                 }
                 // The chunk upload method:
@@ -1436,7 +1443,7 @@
                     return xhr = that.ajax(mix(o, {
                         success: function(result, textStatus, xhr) {
                             options.state('resolve');
-                            Event.trigger(options, 'success', result);
+                            Event.trigger(options.EVENT, 'success', result);
                             
                             ub = that._getUploadedBytes(xhr) ||
                                 (ub + o.chunkSize);
@@ -1464,7 +1471,7 @@
 
                         error: function(jqXHR, textStatus, errorThrown) {
                             options.state('reject');
-                            Event.trigger(options, 'fail', xhr, textStatus);
+                            Event.trigger(options.EVENT, 'fail', xhr, textStatus);
                             that._onFail(xhr, textStatus, errorThrown, o);
                             o.xhr = xhr;
                             o.textStatus = textStatus;
@@ -1562,7 +1569,7 @@
                 var progress = {
                     loaded: 0, // 已经上传的字节数
                     total: 0, // 总共字节数
-                    bitrate: 0 // 比例
+                    bitrate: 0 // 速率
                 };
                 if (obj._progress) {
                     mix(obj._progress, progress);
@@ -1587,11 +1594,12 @@
             _addConvenienceMethods: function(e, data) {
                 var that = this;
                 data._state = 'pending';
+                data.EVENT = {};
                 data._success = function(func) {
-                    Event.on(data, 'success', func.bind(data, that));
+                    Event.on(data.EVENT, 'success', func.bind(data, that));
                 };
                 data._fail = function(func) {
-                    Event.on(data, 'fail', func.bind(data, that));
+                    Event.on(data.EVENT, 'fail', func.bind(data, that));
                 };
                 data.process = function(succ, fail) {
                     if (succ) {
@@ -1614,6 +1622,7 @@
                     if (this.xhr) {
                         return this.xhr.abort();
                     }
+                    Event.trigger(data.EVENT, 'abort', data);
                     return this;
                 };
                 data.state = function (state) {
