@@ -84,6 +84,9 @@
             onDragOver: function() {
                 document.body.className = "hover"
             },
+            onDragLeave: function() {
+                document.body.className = ""
+            },
             onPaster: function() {
                 preview.innerHTML = ''
             }

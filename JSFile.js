@@ -1160,7 +1160,7 @@
 
             _beforeSend: function(e, data) {
                 if (this._activeIndex === 0) {
-                    that.options.onStart.call(this, e, data);
+                    this.options.onStart.call(this, e, data);
                     // Set timer for global bitrate progress calculation:
                     this._bitrateTimer = new this._BitrateTimer();
                     // Reset the global progress values:
@@ -1190,7 +1190,7 @@
                     aborted,
                     options = that._getAjaxSettings(data),
                     send = function() {
-                        this._sendingNo += 1;
+                        that._sendingNo += 1;
                         options._bitrateTimer = new that._BitrateTimer();
                         return xhr = xhr || (
                             (aborted || that.options.onSend.call(that, e, options) === false) ||
