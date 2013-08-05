@@ -1180,7 +1180,7 @@
                 }
                 var that = this,
                     xhr,
-                    aborted,
+                    aborted, 
                     options = that._getAjaxSettings(data),
                     send = function() {
                         this._sendingNo += 1;
