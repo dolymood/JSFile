@@ -777,6 +777,122 @@
                 return new XMLHttpRequest();
             },
 
+            ajax: function() {
+                var htmlType = 'text/html',
+                    jsonType = 'application/json',
+                    escape = encodeURIComponent,
+                    scriptTypeRE = /^(?:text|application)\/javascript/i,
+                    xmlTypeRE = /^(?:text|application)\/xml/i,
+                    blankRE = /^\s*$/,
+                    ajaxSettings = {
+                    type: 'GET',
+                    success: noop,
+                    error: noop,
+                    complete: noop,
+                    context: null,
+                    // MIME types mapping
+                    accepts: {
+                      script: 'text/javascript, application/javascript',
+                      json:   jsonType,
+                      xml:    'application/xml, text/xml',
+                      html:   htmlType,
+                      text:   'text/plain'
+                    },
+                    // Default timeout
+                    timeout: 0
+                };
+                function serialize(params, obj, traditional, scope){
+                    var array = getType(obj, 'array');
+                    each(obj, function(value, key) {
+                        if (scope) key = traditional ? scope : scope + '[' + (array ? '' : key) + ']';
+                        if (!scope && array) params.add(value.name, value.value);
+                        else if (traditional ? getType(value, 'array') : getType(value, 'object'))
+                            serialize(params, value, traditional, key);
+                        else params.add(key, value);
+                    })
+                }
+                function param(data, traditional) {
+                    var ary = [];
+                    ary.add = function(k, v){ this.push(escape(k) + '=' + escape(v)) }
+                    serialize(ary, obj, traditional);
+                    return ary.join('&').replace('%20', '+');
+                }
+                function appendQuery(url, query) {
+                    return (url + '&' + query).replace(/[&?]{1,2}/, '?');
+                }
+                function serializeData(options) {
+                    if (getType(options.data, 'object')) options.data = param(options.data)
+                    if (options.data && (!options.type || options.type.toUpperCase() == 'GET'))
+                        options.url = appendQuery(options.url, options.data)
+                }
+                function mimeToDataType(mime) {
+                    return mime && ( mime == htmlType ? 'html' :
+                        mime == jsonType ? 'json' :
+                        scriptTypeRE.test(mime) ? 'script' :
+                        xmlTypeRE.test(mime) && 'xml' ) || 'text';
+                }
+                return function(options) {
+                    var settings = mix({}, options || {});
+                    each(ajaxSettings, function(val, key) {
+                        if (settings[key] === undefined) {
+                            settings[key] = val;
+                        }
+                    });
+                    if (!settings.url) settings.url = window.location.toString();
+                    serializeData(settings);
+                    var mime = settings.accepts[dataType],
+                        baseHeaders = { },
+                        protocol = /^([\w-]+:)\/\//.test(settings.url) ? RegExp.$1 : window.location.protocol,
+                        xhr = this.xhr(),
+                        abortTimeout;
+
+                    baseHeaders['X-Requested-With'] = 'XMLHttpRequest'
+                    if (mime) {
+                        baseHeaders['Accept'] = mime;
+                        if (mime.indexOf(',') > -1) mime = mime.split(',', 2)[0];
+                        xhr.overrideMimeType && xhr.overrideMimeType(mime);
+                    }
+                    if (settings.contentType || (settings.data && settings.type.toUpperCase() != 'GET'))
+                        baseHeaders['Content-Type'] = (settings.contentType || 'application/x-www-form-urlencoded');
+                    settings.headers = mix(baseHeaders, settings.headers || {});
+
+                    xhr.onreadystatechange = function(){
+                        if (xhr.readyState == 4) {
+                            if (abortTimeout) clearTimeout(abortTimeout);
+                            var result, error = false;
+                            if ((xhr.status >= 200 && xhr.status < 300) || xhr.status == 304 || (xhr.status == 0 && protocol == 'file:')) {
+                                dataType = dataType || mimeToDataType(xhr.getResponseHeader('content-type'));
+                                result = xhr.responseText;
+                                try {
+                                    if (dataType == 'script')    (1,eval)(result);
+                                    else if (dataType == 'xml')  result = xhr.responseXML;
+                                    else if (dataType == 'json') result = blankRE.test(result) ? null : JSON.parse(result);
+                                } catch (e) { error = e }
+
+                                if (error) setting.error.call(settings.context, error, xhr, 'parsererror', settings);
+                                else setting.success.call(settings.context, result, xhr, settings);
+                            } else {
+                                setting.error.call(settings.context, null, xhr, 'error', settings);
+                            }
+                        }
+                    }
+
+                    var async = 'async' in settings ? settings.async : true;
+                    xhr.open(settings.type, settings.url, async);
+
+                    for (var name in settings.headers) xhr.setRequestHeader(name, settings.headers[name]);
+
+                    if (settings.timeout > 0) abortTimeout = setTimeout(function(){
+                        xhr.onreadystatechange = noop;
+                        xhr.abort();
+                        setting.error.call(settings.context, null, xhr, 'timeout', settings);
+                    }, settings.timeout)
+
+                    xhr.send(settings.data ? settings.data : null);
+                    return xhr;
+                };
+            }(),
+
             _initEvents: function() {
                 if (this._isXHRUpload(this.options)) {
                     Event.on(this.options.dropZone, {
@@ -993,20 +1109,71 @@
                 return result;
             },
 
+            _beforeSend: function(e, data) {
+                if (this._activeIndex === 0) {
+                    // Set timer for global bitrate progress calculation:
+                    this._bitrateTimer = new this._BitrateTimer();
+                    // Reset the global progress values:
+                    this._progress.loaded = this._progress.total = 0;
+                    this._progress.bitrate = 0;
+                }
+                // Make sure the container objects for the .response() and
+                // .progress() methods on the data object are available
+                // and reset to their initial state:
+                this._initResponseObject(data);
+                this._initProgressObject(data);
+                data._progress.loaded = data.loaded = data.uploadedBytes || 0;
+                data._progress.total = data.total = this._getTotal(data.files) || 1;
+                data._progress.bitrate = data.bitrate = 0;
+                this._activeIndex += 1;
+                // Initialize the global progress values:
+                this._progress.loaded += data.loaded;
+                this._progress.total += data.total;
+            },
+
             _onSend: function(e, data) {
                 if (!data.submit) {
                     this._addConvenienceMethods(e, data);
                 }
                 var that = this,
                     xhr,
+                    aborted,
                     options = that._getAjaxSettings(data),
                     send = function() {
                         this._sendingNo += 1;
                         options._bitrateTimer = new that._BitrateTimer();
-                        xhr = xhr || 
+                        xhr = xhr || (
+                            (aborted || that.options.onSend.call(that, e, options) === false) ||
+                            that._chunkedUpload(options) || that.ajax(options)
+                        );
+                    };
+                this._beforeSend(e, options);
+                 if (this.options.sequentialUploads ||
+                    (this.options.limitConcurrentUploads &&
+                    this.options.limitConcurrentUploads <= this._sendingNo)) {
+                    if (this.options.limitConcurrentUploads > 1) {
+                        slot = $.Deferred();
+                        this._slots.push(slot);
+                        pipe = slot.pipe(send);
+                    } else {
+                        this._sequence = this._sequence.pipe(send, send);
+                        pipe = this._sequence;
                     }
-                    ///////////////////////
-
+                    // Return the piped Promise object, enhanced with an abort method,
+                    // which is delegated to the jqXHR object of the current upload,
+                    // and jqXHR callbacks mapped to the equivalent Promise methods:
+                    pipe.abort = function () {
+                        aborted = [undefined, 'abort', 'abort'];
+                        if (!jqXHR) {
+                            if (slot) {
+                                slot.rejectWith(options.context, aborted);
+                            }
+                            return send();
+                        }
+                        return jqXHR.abort();
+                    };
+                    return this._enhancePromise(pipe);
+                }
             },
 
             _initProgressListener: function(options) {
