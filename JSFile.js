@@ -684,9 +684,7 @@
                     // 是自动提交的话
                     if (data.autoUpload || (data.autoUpload !== false &&
                             this.options.autoUpload)) {
-                        data.success(function() {
-                            data.submit();
-                        });
+                        data.process().submit();
                     }
                     return this.options.onAdd.call(this, e, data);
                 },
@@ -733,7 +731,9 @@
 
                 onChunkFail: noop,
 
-                onChunkAlways: noop
+                onChunkAlways: noop,
+
+                onStop: noop
 
             }, options);
 
@@ -933,10 +933,17 @@
 
             _onDrop: function(e) {
                 Event.stop(e);
-                var dt = e.dataTransfer;
-                var files = dt.files;
-                // handleFiles(files);
-                this.options.onDrop.call(this, e);
+                var that = this,
+                    dataTransfer = e.dataTransfer,
+                    data = {};
+                if (dataTransfer && dataTransfer.files && dataTransfer.files.length) {
+                    this._getDroppedFiles(dataTransfer, function(files) {
+                        data.files = files;
+                        if (this.options.onDrop.call(this, e) !== false) {
+                            that._onAdd(e, data);
+                        }
+                    });
+                }
             },
 
             _onPaste: function(e) {
@@ -945,7 +952,7 @@
                 if (items && items.length) {
                     each(items, function (item, index) {
                         var file = item.getAsFile && item.getAsFile();
-                        file && data.files.push(file);
+                        file && data.files.push([file]);
                     });
                     if (this.options.onPaste.call(this, e, data) === false ||
                             this._onAdd(e, data) === false) {
@@ -966,6 +973,34 @@
                         that._onAdd(e, data);
                     }
                 });
+            },
+
+            _getDroppedFiles: function(dataTransfer, func) {
+                dataTransfer = dataTransfer || {};
+                var items = dataTransfer.items;
+                if (items && items.length && (items[0].webkitGetAsEntry ||
+                        items[0].getAsEntry)) {
+                    var entries = [];
+                    each(items, function (item) {
+                        var entry;
+                        if (item.webkitGetAsEntry) {
+                            entry = item.webkitGetAsEntry();
+                            if (entry) {
+                                // Workaround for Chrome bug #149735:
+                                entry._file = item.getAsFile();
+                            }
+                            entries.push(entry);
+                        }
+                        entries.push(item.getAsEntry());
+                    });
+                    return this._handleFileTreeEntries(
+                        entries,
+                        null,
+                        function(fs) {
+                            func(fs);
+                        }
+                    );
+                }
             },
 
             _getFileInputFiles: function(fileInput, func) {
@@ -1150,45 +1185,73 @@
                     send = function() {
                         this._sendingNo += 1;
                         options._bitrateTimer = new that._BitrateTimer();
-                        xhr = xhr || (
+                        return xhr = xhr || (
                             (aborted || that.options.onSend.call(that, e, options) === false) ||
                             that._chunkedUpload(options) || that.ajax(mix(options, {
                                 success: function(result, textStatus, xhr) {
-                                    that._onDone(result, textStatus, xhr);
+                                    options.state('resolve');
+                                    Event.trigger(options, 'success', result);
+                                    that._onDone(result, textStatus, xhr, options);
                                 },
                                 error: function(xhr, textStatus, errorThrown) {
+                                    options.state('reject');
+                                    Event.trigger(options, 'fail', xhr, textStatus);
                                     that._onFail(xhr, textStatus, errorThrown, options);
+                                },
+                                complete: function(XHRorResult, textStatus, XHRorError) {
+                                    that._onAlways(
+                                        XHRorResult,
+                                        textStatus,
+                                        XHRorError,
+                                        options
+                                    );
+                                    that._sendingNo -= 1;
+                                    that._activeIndex -= 1;
+                                    if (that._activeIndex === 0) {
+                                        that.options.onStop.call(that);
+                                    }
                                 }
-                            }));
+                            }))
                         );
                     };
                 this._beforeSend(e, options);
-                 if (this.options.sequentialUploads ||
-                    (this.options.limitConcurrentUploads &&
-                    this.options.limitConcurrentUploads <= this._sendingNo)) {
-                    if (this.options.limitConcurrentUploads > 1) {
-                        slot = $.Deferred();
-                        this._slots.push(slot);
-                        pipe = slot.pipe(send);
-                    } else {
-                        this._sequence = this._sequence.pipe(send, send);
-                        pipe = this._sequence;
-                    }
-                    // Return the piped Promise object, enhanced with an abort method,
-                    // which is delegated to the jqXHR object of the current upload,
-                    // and jqXHR callbacks mapped to the equivalent Promise methods:
-                    pipe.abort = function () {
-                        aborted = [undefined, 'abort', 'abort'];
-                        if (!jqXHR) {
-                            if (slot) {
-                                slot.rejectWith(options.context, aborted);
-                            }
-                            return send();
-                        }
-                        return jqXHR.abort();
-                    };
-                    return this._enhancePromise(pipe);
+                return send();
+            },
+
+            _onDone: function(result, textStatus, xhr, options) {
+                var total = options._progress.total,
+                    response = options._response;
+                if (options._progress.loaded < total) {
+                    // Create a progress event if no final progress event
+                    // with loaded equaling total has been triggered:
+                    this._onProgress({
+                        lengthComputable: true,
+                        loaded: total,
+                        total: total
+                    }, options);
                 }
+                response.result = options.result = result;
+                response.textStatus = options.textStatus = textStatus;
+                response.xhr = options.xhr = xhr;
+                this.options.onDone.call(this, options);
+            },
+
+            _onFail: function(xhr, textStatus, errorThrown, options) {
+                var response = options._response;
+                if (options.recalculateProgress) {
+                    // Remove the failed (error or abort) file upload from
+                    // the global progress calculation:
+                    this._progress.loaded -= options._progress.loaded;
+                    this._progress.total -= options._progress.total;
+                }
+                response.xhr = options.xhr = xhr;
+                response.textStatus = options.textStatus = textStatus;
+                response.errorThrown = options.errorThrown = errorThrown;
+                this.options.onFail.call(this, options);
+            },
+
+            _onAlways: function(XHRorResult, textStatus, XHRorError, options) {
+                this.options.onAlways.call(this, options);
             },
 
             _initProgressListener: function(options) {
@@ -1333,8 +1396,6 @@
                     ub = options.uploadedBytes,
                     mcs = options.maxChunkSize || fs,
                     slice = this._blobSlice,
-                    dfd = $.Deferred(),
-                    promise = dfd.promise(),
                     jqXHR,
                     upload;
                 if (!(this._isXHRUpload(options) && slice && (ub || mcs < fs)) ||
@@ -1346,16 +1407,13 @@
                 }
                 if (ub >= fs) {
                     file.error = options.i18n('uploadedBytes');
-                    return this._getXHRPromise(
-                        false,
-                        options.context,
-                        [null, 'error', file.error]
-                    );
+                    Event.trigger(options, 'fail', null, file.error);
+                    return options;
                 }
                 // The chunk upload method:
                 upload = function () {
                     // Clone the options object for each chunk upload:
-                    var o = $.extend({}, options),
+                    var o = mix({}, options),
                         currentLoaded = o._progress.loaded;
                     o.blob = slice.call(
                         file,
@@ -1373,56 +1431,68 @@
                     that._initXHRData(o);
                     // Add progress listeners for this chunk upload:
                     that._initProgressListener(o);
-                    jqXHR = ((that._trigger('chunksend', null, o) !== false && $.ajax(o)) ||
-                            that._getXHRPromise(false, o.context))
-                        .done(function (result, textStatus, jqXHR) {
-                            ub = that._getUploadedBytes(jqXHR) ||
+                    return xhr = that.ajax(mix(o, {
+                        success: function(result, textStatus, xhr) {
+                            options.state('resolve');
+                            Event.trigger(options, 'success', result);
+                            
+                            ub = that._getUploadedBytes(xhr) ||
                                 (ub + o.chunkSize);
                             // Create a progress event if no final progress event
                             // with loaded equaling total has been triggered
                             // for this chunk:
                             if (currentLoaded + o.chunkSize - o._progress.loaded) {
-                                that._onProgress($.Event('progress', {
+                                that._onProgress({
                                     lengthComputable: true,
                                     loaded: ub - o.uploadedBytes,
                                     total: ub - o.uploadedBytes
-                                }), o);
+                                }, o);
                             }
                             options.uploadedBytes = o.uploadedBytes = ub;
                             o.result = result;
                             o.textStatus = textStatus;
-                            o.jqXHR = jqXHR;
-                            that._trigger('chunkdone', null, o);
-                            that._trigger('chunkalways', null, o);
+                            o.xhr = xhr;
+                            that._onDone(result, textStatus, xhr, o);
                             if (ub < fs) {
                                 // File upload not yet complete,
                                 // continue with the next chunk:
                                 upload();
-                            } else {
-                                dfd.resolveWith(
-                                    o.context,
-                                    [result, textStatus, jqXHR]
-                                );
                             }
-                        })
-                        .fail(function (jqXHR, textStatus, errorThrown) {
-                            o.jqXHR = jqXHR;
+                        },
+
+                        error: function(jqXHR, textStatus, errorThrown) {
+                            options.state('reject');
+                            Event.trigger(options, 'fail', xhr, textStatus);
+                            that._onFail(xhr, textStatus, errorThrown, o);
+                            o.xhr = xhr;
                             o.textStatus = textStatus;
                             o.errorThrown = errorThrown;
-                            that._trigger('chunkfail', null, o);
-                            that._trigger('chunkalways', null, o);
-                            dfd.rejectWith(
-                                o.context,
-                                [jqXHR, textStatus, errorThrown]
+                        },
+
+                        complete: function(XHRorResult, textStatus, XHRorError) {
+                            that._onAlways(
+                                XHRorResult,
+                                textStatus,
+                                XHRorError,
+                                options
                             );
-                        });
+                            that._sendingNo -= 1;
+                            that._activeIndex -= 1;
+                            if (that._activeIndex === 0) {
+                                that.options.onStop.call(that);
+                            }
+                        }
+                    }));
                 };
-                this._enhancePromise(promise);
-                promise.abort = function () {
-                    return jqXHR.abort();
-                };
-                upload();
-                return promise;
+                return upload();
+            },
+
+            _getUploadedBytes: function(xhr) {
+                var range = xhr.getResponseHeader('Range'),
+                    parts = range && range.split('-'),
+                    upperBytesPos = parts && parts.length > 1 &&
+                        parseInt(parts[1], 10);
+                return upperBytesPos && upperBytesPos + 1;
             },
 
             _initDataSettings: function(options) {
@@ -1515,11 +1585,20 @@
             _addConvenienceMethods: function(e, data) {
                 var that = this;
                 data._state = 'pending';
-                data.success = function(func) {
+                data._success = function(func) {
                     Event.on(data, 'success', func.bind(data, that));
                 };
-                data.fail = function(func) {
+                data._fail = function(func) {
                     Event.on(data, 'fail', func.bind(data, that));
+                };
+                data.process = function(succ, fail) {
+                    if (succ) {
+                        data._success(succ);
+                    }
+                    if (fail) {
+                        data._fail(fail);
+                    }
+                    return data;
                 };
                 data.submit = function () {
                     if (this.state() !== 'pending') {
@@ -1534,8 +1613,8 @@
                     }
                     return this;
                 };
-                data.state = function () {
-                    return data._state;
+                data.state = function (state) {
+                    return state ? data._state: (data._state = state);
                 };
                 data.progress = function () {
                     return this._progress;
