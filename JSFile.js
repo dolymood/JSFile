@@ -906,6 +906,7 @@
                     Event.on(this.options.dropZone, {
                         'dragenter': this._onDragEnter.bind(this),
                         'dragover': this._onDragOver.bind(this),
+                        'dragleave': this._onDragLeave.bind(this),
                         'drop': this._onDrop.bind(this)
                     });
                     Event.on(this.options.pasteZone, 'paste', this._onPaste.bind(this));
@@ -915,7 +916,7 @@
             },
 
             _destroyEvents: function() {
-                Event.off(this.options.dropZone, 'dragenter dragover drop');
+                Event.off(this.options.dropZone, 'dragenter dragover dragleave drop');
                 Event.off(this.options.pasteZone, 'paste');
                 this.options.fileInput &&
                     Event.off(this.options.fileInput, 'change');
@@ -929,6 +930,11 @@
             _onDragOver: function(e) {
                 Event.stop(e);
                 this.options.onDragOver.call(this, e);
+            },
+
+            _onDragLeave: function(e) {
+                Event.stop(e);
+                this.options.onDragLeave.call(this, e);
             },
 
             _onDrop: function(e) {
