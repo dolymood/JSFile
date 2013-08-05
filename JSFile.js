@@ -198,9 +198,9 @@
             names = names.match(rword);
             if (!names || !names.length) return false;
             var i = names.length;
-            do {
+            while(i--) {
                 func.call(Event, ele, names[i], args[2], args[3]);
-            } while(--i);
+            };
         };
     });
     function handlerFalse(func, context) {
@@ -939,7 +939,7 @@
                 if (dataTransfer && dataTransfer.files && dataTransfer.files.length) {
                     this._getDroppedFiles(dataTransfer, function(files) {
                         data.files = files;
-                        if (this.options.onDrop.call(this, e) !== false) {
+                        if (that.options.onDrop.call(that, e, data) !== false) {
                             that._onAdd(e, data);
                         }
                     });
@@ -989,7 +989,7 @@
                                 // Workaround for Chrome bug #149735:
                                 entry._file = item.getAsFile();
                             }
-                            entries.push(entry);
+                            return entries.push(entry);
                         }
                         entries.push(item.getAsEntry());
                     });
@@ -1082,7 +1082,7 @@
                 var files = [];
                 var len = entries.length;
                 Event.on(entries, 'onedone', function(file) {
-                    files.push(file);
+                    files.push(file.data);
                     // 所有的都已得到
                     if (files.length === len) {
                         Event.off(entries, 'onedone');
@@ -1142,7 +1142,7 @@
                 each(fileSet || data.files, function (fl, index) {
                     var newData = mix({}, data);
                     // 每一个fileSet中包含的多个file
-                    newData.files = fileSet ? fl : [fl];
+                    newData.files = fileSet ? fl : getType(fl, 'array') ? fl : [fl];
                     newData.paramName = paramNameSet[index];
                     that._initResponseObject(newData);
                     that._initProgressObject(newData);
@@ -1154,6 +1154,7 @@
 
             _beforeSend: function(e, data) {
                 if (this._activeIndex === 0) {
+                    that.options.onStart.call(this, e, data);
                     // Set timer for global bitrate progress calculation:
                     this._bitrateTimer = new this._BitrateTimer();
                     // Reset the global progress values:
@@ -1189,13 +1190,13 @@
                             (aborted || that.options.onSend.call(that, e, options) === false) ||
                             that._chunkedUpload(options) || that.ajax(mix(options, {
                                 success: function(result, textStatus, xhr) {
-                                    options.state('resolve');
-                                    Event.trigger(options, 'success', result);
+                                    data.state('resolve');
+                                    Event.trigger(data, 'success', result);
                                     that._onDone(result, textStatus, xhr, options);
                                 },
                                 error: function(xhr, textStatus, errorThrown) {
-                                    options.state('reject');
-                                    Event.trigger(options, 'fail', xhr, textStatus);
+                                    data.state('reject');
+                                    Event.trigger(data, 'fail', xhr, textStatus);
                                     that._onFail(xhr, textStatus, errorThrown, options);
                                 },
                                 complete: function(XHRorResult, textStatus, XHRorError) {
@@ -1334,7 +1335,7 @@
             _initXHRData: function(options) {
                 var that = this,
                     formData,
-                    file = options.files[0][0],
+                    file = options.files[0],
                     // Ignore non-multipart setting if not supported:
                     multipart = options.multipart || !support.xhrFileUpload,
                     paramName = options.paramName[0];
@@ -1362,19 +1363,14 @@
                         formData.append(paramName, options.blob, file.name);
                     } else {
                         each(options.files, function (file, index) {
-                            // 每一个file都是数组
-                            // 此处。。。。。。
-                            each(file, function(fl) {
-                                if (getType(fl, 'file') ||
-                                    getType(fl, 'Blob')) {
-                                    formData.append(
-                                        options.paramName[index] || paramName,
-                                        fl,
-                                        fl.name
-                                    );
-                                }
-                            });
-                            
+                            if (getType(file, 'file') ||
+                                getType(file, 'Blob')) {
+                                formData.append(
+                                    options.paramName[index] || paramName,
+                                    file,
+                                    file.name
+                                );
+                            }
                         });
                     }
                     options.data = formData;
@@ -1391,7 +1387,7 @@
             _chunkedUpload: function(options, testOnly) {
                 options.uploadedBytes = options.uploadedBytes || 0;
                 var that = this,
-                    file = options.files[0][0],
+                    file = options.files[0],
                     fs = file.size,
                     ub = options.uploadedBytes,
                     mcs = options.maxChunkSize || fs,
@@ -1598,7 +1594,8 @@
                     if (fail) {
                         data._fail(fail);
                     }
-                    return data;
+                    if (succ || fail) data._process = data;
+                    return data._process || data;
                 };
                 data.submit = function () {
                     if (this.state() !== 'pending') {
@@ -1614,7 +1611,12 @@
                     return this;
                 };
                 data.state = function (state) {
-                    return state ? data._state: (data._state = state);
+                    if (state) {
+                        data._state = state;
+                    } else if (this.xhr || this._process) {
+                        state = data._state;
+                    }
+                    return state;
                 };
                 data.progress = function () {
                     return this._progress;
@@ -1634,6 +1636,8 @@
     mix(JSFile, {
 
         mix: mix,
+
+        each: each,
 
         noop: noop,
 

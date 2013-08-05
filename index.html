@@ -33,13 +33,61 @@
     li span {
         color: rgb(0, 128, 255);
     }
+    .hover {
+        background-color: rgba(0,0,0,.4);
+    }
 </style>
 </head>
 <body>
-    
+    <form action="/upload">
+        <input type="file" name="files[]" multiple="" id="fl">
+    </form>
+    <div id="imgs"></div>
     <script type="text/javascript">
     (function(win, document) {
-        
+        var preview = document.getElementById('imgs');
+        var up = JSFile.upload(document.getElementById('fl'), {
+            onAdd: function(e, data) {
+                JSFile.each(data.files, function(file) {
+                    // var img = document.createElement("img");
+                    // img.file = file;
+                    // preview.appendChild(img);
+                    // var reader = new FileReader();
+                    // reader.onload = (function(aImg) { 
+                    //     return function(e) { aImg.src = e.target.result; } 
+                    // })(img);
+                    // reader.readAsDataURL(file);
+                    var img = new Image();
+                    img.onload = function() {
+                        window.URL.revokeObjectURL(this.src)
+                    }
+                    img.src = window.URL.createObjectURL(file);
+                    preview.appendChild(img);
+                    var i = document.createElement('p');
+                    i.innerHTML = '大小：' + file.size + 'bytes    ' + '名字：' + file.name;
+                    preview.appendChild(i);
+                });
+            },
+
+            onChange: function() {
+                preview.innerHTML = ''
+            },
+
+            onDrop: function() {
+                preview.innerHTML = ''
+                document.body.className = ""
+            },
+
+            onDragEnter: function() {
+                document.body.className = "hover"
+            },
+            onDragOver: function() {
+                document.body.className = "hover"
+            },
+            onPaster: function() {
+                preview.innerHTML = ''
+            }
+        });
 
     })(window, document);
     </script>
