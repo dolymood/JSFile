@@ -845,7 +845,7 @@
                     var mime = settings.accepts[dataType],
                         baseHeaders = { },
                         protocol = /^([\w-]+:)\/\//.test(settings.url) ? RegExp.$1 : window.location.protocol,
-                        xhr = this.xhr(),
+                        xhr = settings._xhr() || this.xhr(),
                         abortTimeout;
 
                     baseHeaders['X-Requested-With'] = 'XMLHttpRequest'
@@ -1405,7 +1405,7 @@
                     ub = options.uploadedBytes,
                     mcs = options.maxChunkSize || fs,
                     slice = this._blobSlice,
-                    jqXHR,
+                    xhr,
                     upload;
                 if (!(this._isXHRUpload(options) && slice && (ub || mcs < fs)) ||
                         options.data) {
@@ -1440,7 +1440,7 @@
                     that._initXHRData(o);
                     // Add progress listeners for this chunk upload:
                     that._initProgressListener(o);
-                    return xhr = that.ajax(mix(o, {
+                    return (xhr = that.ajax(mix(o, {
                         success: function(result, textStatus, xhr) {
                             options.state('resolve');
                             Event.trigger(options.EVENT, 'success', result);
@@ -1469,7 +1469,7 @@
                             }
                         },
 
-                        error: function(jqXHR, textStatus, errorThrown) {
+                        error: function(xhr, textStatus, errorThrown) {
                             options.state('reject');
                             Event.trigger(options.EVENT, 'fail', xhr, textStatus);
                             that._onFail(xhr, textStatus, errorThrown, o);
@@ -1491,7 +1491,7 @@
                                 that.options.onStop.call(that);
                             }
                         }
-                    }));
+                    })));
                 };
                 return upload();
             },

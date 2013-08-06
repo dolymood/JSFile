@@ -24,6 +24,7 @@ function start(route) {
 }
 start(function(pathname, response, postData, request) {
     console.log("About to route a request for "  +  pathname );
+    console.log("postData: " + postData);
     response.writeHead( 200,  { "Content - Type":  "text/html"}); 
     response.write('{"status": 0, "statusText": {"msg": "ok"}}');  
     response.end(); 
