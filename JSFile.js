@@ -1058,11 +1058,11 @@
                     if (entry._file) {
                         // Workaround for Chrome bug #149735
                         entry._file.relativePath = path;
-                        files = [entry._file];
+                        files = entry._file;
                     } else {
                         entry.file(function (file) {
                             file.relativePath = path;
-                            files = [file];
+                            files = file;
                             Event.trigger(entries, 'onedone', files);
                         }, errorHandler);
                     }
