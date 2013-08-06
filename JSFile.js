@@ -484,7 +484,7 @@
             each((
                 'NOT_FOUND_ERR SECURITY_ERR ABORT_ERR NOT_READABLE_ERR ENCODING_ERR ' +
                 'NO_MODIFICATION_ALLOWED_ERR INVALID_STATE_ERR SYNTAX_ERR  ' +
-                'INVALID_MODIFICATION_ERR QUOTA_EXCEEDED_ERR TYPE_MISMATCH_ERR PATH_EXISTS_ERR '
+                'INVALID_MODIFICATION_ERR QUOTA_EXCEEDED_ERR TYPE_MISMATCH_ERR PATH_EXISTS_ERR'
             ).match(rword), function(NAME, i) {
                 FEProto[NAME] = i + 1;
             });
