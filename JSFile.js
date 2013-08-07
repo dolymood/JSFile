@@ -300,7 +300,6 @@
                 objURL = linkA.href = getObjURL(blob);
                 linkA.download = name;
                 Event.trigger(linkA, 'click');
-                click(linkA);
                 filesaver.readyState = filesaver.DONE;
                 Event.trigger(filesaver, 'writestart progress write writeend');
                 return;
@@ -644,7 +643,7 @@
                 // progress事件触发间隔
                 progressInterval: 100,
 
-                // progress过程中 计算上传百分比的时间间隔
+                // progress过程中 计算速率的时间间隔
                 bitrateInterval: 500,
 
                 // 当有文件新增的时候是否自动上传

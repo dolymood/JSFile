@@ -40,9 +40,11 @@
         position: absolute;
         top: 30px;
         right: 30px;
+        color: green;
     }
     #save {
-        top: 40px;
+        top: 5px;
+        right: 5px;
     }
 </style>
 </head>
@@ -51,7 +53,7 @@
         <input type="file" name="files[]" multiple="" id="fl">
     </form>
     <div id="imgs"></div>
-    <div id="btes">sfh</div>
+    <div id="btes"></div>
     <div id="save"><textarea id="txt"></textarea><button id="sv">保存txt</button></div>
     <script type="text/javascript">
     (function(win, document) {
@@ -114,7 +116,7 @@
             },
 
             onProgress: function(e,data) {
-                btes.innerHTML += ("<p>" + data.files[0].name + ':' + data._progress.loaded + " / " + data._progress.total +"</p>");
+                btes.innerHTML += ("<p>" + data._progress.loaded + " / " + data._progress.total +"</p>");
             }
         });
 
