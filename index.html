@@ -36,6 +36,14 @@
     .hover {
         background-color: rgba(0,0,0,.4);
     }
+    #btes,#save {
+        position: absolute;
+        top: 30px;
+        right: 30px;
+    }
+    #save {
+        top: 40px;
+    }
 </style>
 </head>
 <body>
@@ -43,10 +51,21 @@
         <input type="file" name="files[]" multiple="" id="fl">
     </form>
     <div id="imgs"></div>
+    <div id="btes">sfh</div>
+    <div id="save"><textarea id="txt"></textarea><button id="sv">保存txt</button></div>
     <script type="text/javascript">
     (function(win, document) {
-        var preview = document.getElementById('imgs');
-        var up = JSFile.upload(document.getElementById('fl'), {
+        var $ = function(id) {
+            return document.getElementById(id);
+        }
+        var preview = $('imgs');
+        var btes = $('btes');
+        var txt = $('txt');
+        $('sv').onclick = function() {
+            JSFile.saveAsTxt(txt.value, '默认');
+        }
+        
+        var up = JSFile.upload($('fl'), {
             onAdd: function(e, data) {
                 JSFile.each(data.files, function(file) {
                     // var img = document.createElement("img");
@@ -92,6 +111,10 @@
             },
             onPaster: function() {
                 preview.innerHTML = ''
+            },
+
+            onProgress: function(e,data) {
+                btes.innerHTML += ("<p>" + data.files[0].name + ':' + data._progress.loaded + " / " + data._progress.total +"</p>");
             }
         });
 
