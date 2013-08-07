@@ -57,12 +57,15 @@
                     //     return function(e) { aImg.src = e.target.result; } 
                     // })(img);
                     // reader.readAsDataURL(file);
-                    var img = new Image();
-                    img.onload = function() {
-                        window.URL.revokeObjectURL(this.src)
+                    if (file.type.match(/^image\/.+$/i)) {
+                        var img = new Image();
+                        img.onload = function() {
+                            window.URL.revokeObjectURL(this.src)
+                        }
+                        img.src = window.URL.createObjectURL(file);
+                        preview.appendChild(img);
                     }
-                    img.src = window.URL.createObjectURL(file);
-                    preview.appendChild(img);
+                    
                     var i = document.createElement('p');
                     i.innerHTML = '大小：' + file.size + 'bytes    ' + '名字：' + file.name;
                     preview.appendChild(i);
