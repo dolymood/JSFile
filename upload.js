@@ -1,12 +1,15 @@
 /**
  * 文件上传模拟后台程序
  */
-var http = require("http");  //请求node.js自带的 http 模块 会得到一个对象
+var express = require("express"); 
+var app = new express();
 var url = require("url");
 var fs = require('fs');
 // var formidable = require('formidable');
 function start(route) {
-    http.createServer(function( request,  response ) { // request 对象 包含了请求的一些参数 // response 对象 相应请求的对象
+    app.listen(8888);
+    app.use(express.bodyParser()); 
+    app.post('/', function(request,  response) {
         var pathname =  url.parse(request.url).pathname;
         var postData = "";
         console.log("request " + pathname + "received"); 
@@ -34,8 +37,7 @@ function start(route) {
         //     // response.write("<image src=/show />");
         //     // response.end();
         // });
-        
-    }).listen (8888);  // listen HTTP服务器监听的端口号 这里设置为8080
+    });
     console.log('Server started');
 }
 start(function(pathname, response, postData, request) {
