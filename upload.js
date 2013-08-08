@@ -4,13 +4,14 @@
 var http = require("http");  //请求node.js自带的 http 模块 会得到一个对象
 var url = require("url");
 var fs = require('fs');
+// var formidable = require('formidable');
 function start(route) {
     http.createServer(function( request,  response ) { // request 对象 包含了请求的一些参数 // response 对象 相应请求的对象
         var pathname =  url.parse(request.url).pathname;
         var postData = "";
         console.log("request " + pathname + "received"); 
         
-        request. setEncoding("utf8"); 
+        // request. setEncoding("utf8"); 
         
         request.addListener("data", function(postDataChunk) {//新的小数据块到达了
             postData += postDataChunk;
@@ -20,6 +21,19 @@ function start(route) {
             console.log(request.files)
             route(pathname, response, postData, request);
         });
+
+        // var form = new formidable.IncomingForm();
+
+        // console.log("About to parse");
+        // form.parse(request, function(error, fields, files){
+        //     console.log("parse done");
+        //     fs.renameSync(files.upload.path, "/home/tmp/test.png");
+        //     console.log(files);
+        //     // response.writeHead(200, {"Content-type": "text/html"});
+        //     // response.write("Received image:<br>");
+        //     // response.write("<image src=/show />");
+        //     // response.end();
+        // });
         
     }).listen (8888);  // listen HTTP服务器监听的端口号 这里设置为8080
     console.log('Server started');

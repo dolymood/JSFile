@@ -595,6 +595,7 @@
 
             xhrFileUpload: !!(win.XMLHttpRequestUpload && win.FileReader),
 
+            // http://www.w3.org/TR/XMLHttpRequest2/#interface-formdata
             xhrFormDataFileUpload: !!win.FormData
 
         };
@@ -1385,6 +1386,7 @@
                             }
                         });
                     }
+                    options.contentType = 'multipart/form-data';
                     options.data = formData;
                 }
                 // Blob reference is not needed anymore, free memory:
@@ -1593,7 +1595,7 @@
             _addConvenienceMethods: function(e, data) {
                 var that = this;
                 data._state = 'pending';
-                data.EVENT = {};
+                data.EVENT = data.EVENT || {};
                 data._success = function(func) {
                     Event.on(data.EVENT, 'success', func.bind(data, that));
                 };
@@ -1638,6 +1640,65 @@
                 data.response = function () {
                     return this._response;
                 };
+            },
+
+            active: function() {
+                return this._activeIndex;
+            },
+
+            progress: function() {
+                return this._progress;
+            },
+
+            add: function(data) {
+                var that = this;
+                if (!data || this.options.disabled) {
+                    return;
+                }
+                if (data.fileInput && !data.files) {
+                    this._getFileInputFiles(data.fileInput, function (files) {
+                        data.files = files;
+                        that._onAdd(null, data);
+                    });
+                } else {
+                    data.files = [].slice.call(data.files);
+                    this._onAdd(null, data);
+                }
+            },
+
+            send: function(data) {
+                if (data && !this.options.disabled) {
+                    if (data.fileInput && !data.files) {
+                        var that = this,
+                            xhr,
+                            aborted;
+                        data.EVENT = data.EVENT || {};
+                        Event.on(data.EVENT, 'abort', function() {
+                            aborted = true;
+                            if (xhr) xhr.abort();
+                        });
+                        this._getFileInputFiles(data.fileInput, function (files) {
+                            if (aborted) {
+                                return;
+                            }
+                            if (!files.length) {
+                                return;
+                            }
+                            data.files = files;
+                            // Event.on(data.EVENT, 'success', function(result, textStatus, xhr) {
+                            // });
+                            // Event.on(data.EVENT, 'fail', function(xhr, textStatus, errorThrown) {
+                            // });
+                            xhr = that._onSend(null, data);
+                        });
+                        return xhr;
+                    }
+                    data.files = [].slice.call(data.files);
+                    if (data.files.length) {
+                        return this._onSend(null, data);
+                    }
+                }
+                return false;
             }
 
         });
@@ -1661,11 +1722,15 @@
 
         Event: Event,
 
+        URL: URL,
+
         BlobBuilder: BlobBuilder,
 
         Blob: Blob,
 
         saveAs: saveAs,
+
+        Upload: Upload,
 
         upload: function(ele, options) {
             options || (options = {});
