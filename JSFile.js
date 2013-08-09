@@ -1107,7 +1107,7 @@
                     paramName = options.paramName;
                 if (!paramName) {
                     paramName = [];
-                    var name = fileInput.name || 'files[]',
+                    var name = fileInput.name || 'files',
                         i = (fileInput.files || [1]).length;
                     while (i--) {
                         paramName.push(name);
@@ -1386,7 +1386,8 @@
                             }
                         });
                     }
-                    options.contentType = 'multipart/form-data';
+                    var boundary =  '———————–' + new Date().getTime();
+                    // options.contentType = 'multipart/form-data;boundary=' + boundary;
                     options.data = formData;
                 }
                 // Blob reference is not needed anymore, free memory:
