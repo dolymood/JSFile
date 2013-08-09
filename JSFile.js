@@ -1386,8 +1386,8 @@
                             }
                         });
                     }
-                    var boundary =  '———————–' + new Date().getTime();
-                    // options.contentType = 'multipart/form-data;boundary=' + boundary;
+                    var boundary =  '-----' + new Date().getTime();
+                    options.contentType = 'multipart/form-data;boundary=' + boundary;
                     options.data = formData;
                 }
                 // Blob reference is not needed anymore, free memory:
