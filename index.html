@@ -49,8 +49,9 @@
 </style>
 </head>
 <body>
-    <form action="/upload" method="POST">
-        <input type="file" name="filedata" multiple="" id="fl">
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+        <input type="file" name="filedata" multiple="" ec id="fl">
+        <input type="submit" value="tij">
     </form>
     <div id="imgs"></div>
     <div id="btes"></div>
@@ -66,6 +67,18 @@
         $('sv').onclick = function() {
             JSFile.saveAsTxt(txt.value, '默认');
         }
+
+        JSFile.Upload.ajax({
+            type: 'POST',
+            url: '/upload',
+            data: {},
+            success: function() {
+
+            },
+            error: function() {
+                
+            }
+        });
         
         var up = JSFile.upload($('fl'), {
             onAdd: function(e, data) {
