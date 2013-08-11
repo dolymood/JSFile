@@ -5,7 +5,6 @@
 
 var express = require('express')
   , routes = require('./routes')
-  , user = require('./routes/user')
   , upload = require('./routes/upload')
   , http = require('http')
   , path = require('path');
@@ -29,8 +28,6 @@ if ('development' == app.get('env')) {
 }
 
 app.get('/', routes.index);
-app.get('/users', user.list);
-app.get('/upload', upload.upload);
 app.post('/upload', upload.upload);
 
 http.createServer(app).listen(app.get('port'), function(){
