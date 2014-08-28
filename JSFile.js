@@ -344,7 +344,7 @@
                             fileEntry.createWriter(abortable(function(fileWriter) {
                                 // http://dev.w3.org/2009/dap/file-system/file-writer.html
                                 fileWriter.onwriteend = function(evt) {
-                                    targetView && targetView.location.href = fileEntry.toURL();
+                                    targetView && (targetView.location.href = fileEntry.toURL());
                                     deletionQueue.push(fileEntry);
                                     filesaver.readyState = filesaver.DONE;
                                     Event.trigger(filesaver, 'writeend', evt);
