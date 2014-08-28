@@ -9,7 +9,7 @@
  * Dual licensed under the MIT licenses.
  * ----------------------------------------------------------------------------
  */
-(function(win, doc) {
+;(function(win, doc) {
 
     // http://www.w3.org/TR/FileAPI/
     var JSFile = JSFile || {},
